@@ -6,4 +6,4 @@ aaaa =
     ''
   end
 
-T.reveal_type(aaaa) # error: T.any(Integer, String)
+T.reveal_type(aaaa) # error: T.nilable(String)
