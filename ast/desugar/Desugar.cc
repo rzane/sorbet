@@ -1862,7 +1862,7 @@ ExpressionPtr node2TreeImpl(DesugarContext dctx, unique_ptr<parser::Node> what) 
                         // the Splat in that case, and non-zero if there was a real Array literal.
                         stat->loc = loc;
                         // Desguar
-                        //   [a, *x, remaining}
+                        //   [a, *x, remaining]
                         // into
                         //   a.concat(<splat>(x)).concat(remaining)
                         auto var = node2TreeImpl(dctx, std::move(stat));
