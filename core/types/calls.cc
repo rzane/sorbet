@@ -4130,7 +4130,6 @@ public:
         } else {
             res.main.returnTypeBeforeSolve = Types::arrayOf(gs, make_type<TupleType>(move(unwrappedElems)));
         }
-        res.main.returnTypeBeforeSolve = Types::arrayOf(gs, make_type<TupleType>(move(unwrappedElems)));
     }
 } Array_zip;
 
