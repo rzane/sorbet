@@ -2271,7 +2271,8 @@ public:
     }
 } T_Generic_squareBrackets;
 
-DispatchResult applySig(const GlobalState &gs, const DispatchArgs &args, DispatchComponent &&main, size_t argsToDropOffEnd) {
+DispatchResult applySig(const GlobalState &gs, const DispatchArgs &args, DispatchComponent &&main,
+                        size_t argsToDropOffEnd) {
     // We should always have the actual receiver plus whatever args we're going
     // to ignore for dispatching purposes.
     if (args.args.size() < (argsToDropOffEnd + 1)) {
@@ -2295,8 +2296,8 @@ DispatchResult applySig(const GlobalState &gs, const DispatchArgs &args, Dispatc
 
     auto recv = *args.args[0];
     return recv.type.dispatchCall(gs, {core::Names::sig(), callLocs, numPosArgs, dispatchArgsArgs, recv.type, recv,
-                                      recv.type, args.block, args.originForUninitialized, args.isPrivateOk,
-                                      args.suppressErrors, args.enclosingMethodForSuper});
+                                       recv.type, args.block, args.originForUninitialized, args.isPrivateOk,
+                                       args.suppressErrors, args.enclosingMethodForSuper});
 }
 
 class SorbetPrivateStatic_sig : public IntrinsicMethod {
@@ -3837,7 +3838,8 @@ class Magic_checkMatchArray : public IntrinsicMethod {
     }
 } Magic_checkMatchArray;
 
-DispatchResult digImplementation(const GlobalState &gs, const DispatchArgs &args, DispatchComponent &&main, NameRef methodToDigWith) {
+DispatchResult digImplementation(const GlobalState &gs, const DispatchArgs &args, DispatchComponent &&main,
+                                 NameRef methodToDigWith) {
     if (args.args.size() == 0 || args.numPosArgs != args.args.size()) {
         // A type error was already reported for arg mismatch
         return DispatchResult(move(main));
