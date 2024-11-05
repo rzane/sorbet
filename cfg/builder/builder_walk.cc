@@ -242,6 +242,15 @@ BasicBlock *CFGBuilder::walkHash(CFGContext cctx, ast::Hash &h, BasicBlock *curr
     return current;
 }
 
+BasicBlock *CFGBuilder::walkEmptyTreeInIf(CFGContext cctx, BasicBlock *current) {
+    auto methodLocs = cctx.inWhat.symbol.data(cctx.ctx)->locs();
+    auto enclosingLoc = cctx.ctx.locAt(cctx.inWhat.loc);
+    auto ownerLoc = absl::c_find_if(methodLocs, [&](auto &loc) { return enclosingLoc.contains(loc); });
+    auto nilLoc = ownerLoc != methodLocs.end() ? ownerLoc->offsets() : cctx.inWhat.loc.copyEndWithZeroLength();
+    synthesizeExpr(current, cctx.target, nilLoc, make_insn<Literal>(core::Types::nilClass()));
+    return current;
+}
+
 BasicBlock *CFGBuilder::walkBlockReturn(CFGContext cctx, core::LocOffsets loc, ast::ExpressionPtr &expr,
                                         BasicBlock *current) {
     LocalRef exprSym = cctx.newTemporary(core::Names::nextTemp());
@@ -385,8 +394,10 @@ BasicBlock *CFGBuilder::walk(CFGContext cctx, ast::ExpressionPtr &what, BasicBlo
                 auto elseBlock = cctx.inWhat.freshBlock(cctx.loops);
                 conditionalJump(cont, ifSym, thenBlock, elseBlock, cctx.inWhat, a.cond.loc());
 
-                auto thenEnd = walk(cctx, a.thenp, thenBlock);
-                auto elseEnd = walk(cctx, a.elsep, elseBlock);
+                auto thenEnd = ast::isa_tree<ast::EmptyTree>(a.thenp) ? walkEmptyTreeInIf(cctx, thenBlock)
+                                                                      : walk(cctx, a.thenp, thenBlock);
+                auto elseEnd = ast::isa_tree<ast::EmptyTree>(a.elsep) ? walkEmptyTreeInIf(cctx, elseBlock)
+                                                                      : walk(cctx, a.elsep, elseBlock);
                 if (thenEnd != cctx.inWhat.deadBlock() || elseEnd != cctx.inWhat.deadBlock()) {
                     if (thenEnd == cctx.inWhat.deadBlock()) {
                         ret = elseEnd;
@@ -1025,15 +1036,7 @@ BasicBlock *CFGBuilder::walk(CFGContext cctx, ast::ExpressionPtr &what, BasicBlo
                 ret = current;
             },
 
-            [&](const ast::EmptyTree &n) {
-                auto methodLocs = cctx.inWhat.symbol.data(cctx.ctx)->locs();
-                auto enclosingLoc = cctx.ctx.locAt(cctx.inWhat.loc);
-                auto ownerLoc = absl::c_find_if(methodLocs, [&](auto &loc) { return enclosingLoc.contains(loc); });
-                auto nilLoc =
-                    ownerLoc != methodLocs.end() ? ownerLoc->offsets() : cctx.inWhat.loc.copyEndWithZeroLength();
-                current->exprs.emplace_back(cctx.target, nilLoc, make_insn<Literal>(core::Types::nilClass()));
-                ret = current;
-            },
+            [&](const ast::EmptyTree &n) { ret = current; },
 
             [&](const ast::ClassDef &c) { Exception::raise("Should have been removed by FlattenWalk"); },
             [&](const ast::MethodDef &c) { Exception::raise("Should have been removed by FlattenWalk"); },
