@@ -205,6 +205,15 @@ const PackageInfo &PackageDB::getPackageInfo(MangledName mangledName) const {
     return *it->second;
 }
 
+PackageInfo &PackageDB::getPackageInfo(MangledName mangledName) {
+    auto it = packages_.find(mangledName);
+    if (it == packages_.end()) {
+        // TODO
+        return const_cast<NonePackage &>(NONE_PKG);
+    }
+    return *it->second;
+}
+
 const vector<MangledName> &PackageDB::packages() const {
     return mangledNames;
 }

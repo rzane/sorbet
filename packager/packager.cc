@@ -229,6 +229,7 @@ public:
 
     optional<pair<core::packages::StrictDependenciesLevel, core::LocOffsets>> strictDependenciesLevel = nullopt;
     optional<pair<core::NameRef, core::LocOffsets>> layer = nullopt;
+    optional<int> sccID = nullopt;
 
     // PackageInfoImpl is the only implementation of PackageInfo
     const static PackageInfoImpl &from(const core::packages::PackageInfo &pkg) {
@@ -1546,6 +1547,67 @@ unique_ptr<PackageInfoImpl> createAndPopulatePackageInfo(core::GlobalState &gs, 
     return info;
 }
 
+struct SCCMetadata {
+    int nextIndex = 1;
+    int nextSCCId = 0;
+    UnorderedMap<core::packages::MangledName, int> index;
+    UnorderedMap<core::packages::MangledName, int> lowlink;
+    UnorderedMap<core::packages::MangledName, bool> onstack;
+    std::vector<core::packages::MangledName> stack;
+};
+
+void strongConnect(core::GlobalState &gs, SCCMetadata &metadata, core::packages::MangledName pkgName) {
+    if (!gs.packageDB().getPackageInfo(pkgName).exists()) {
+        return;
+    }
+    auto &pkgInfo = PackageInfoImpl::from(gs.packageDB().getPackageInfo(pkgName));
+    metadata.index[pkgName] = metadata.nextIndex;
+    metadata.lowlink[pkgName] = metadata.nextIndex;
+    metadata.nextIndex++;
+    metadata.stack.push_back(pkgName);
+    metadata.onstack[pkgName] = true;
+    for (auto &i : pkgInfo.importedPackageNames) {
+        if (i.type == ImportType::Test) {
+            continue;
+        }
+        if (metadata.index[i.name.mangledName] == 0) {
+            strongConnect(gs, metadata, i.name.mangledName);
+            if (metadata.index[i.name.mangledName] != 0) {
+                metadata.lowlink[pkgName] = std::min(metadata.lowlink[pkgName], metadata.lowlink[i.name.mangledName]);
+            }
+            // TODO: add a test case when the condition above is false
+            // occurs when a package that doesn't exist is imported
+        } else if (metadata.onstack[i.name.mangledName]) {
+            metadata.lowlink[pkgName] = std::min(metadata.lowlink[pkgName], metadata.index[i.name.mangledName]);
+        }
+    }
+
+    if (metadata.index[pkgName] == metadata.lowlink[pkgName]) {
+        while (true) {
+            core::packages::MangledName w = metadata.stack.back();
+            PackageInfoImpl &w_info = PackageInfoImpl::from(gs.packageDB().getPackageInfo(w));
+            metadata.stack.pop_back();
+            metadata.onstack[w] = false;
+            w_info.sccID = metadata.nextSCCId;
+            if (w == pkgName) {
+                metadata.nextSCCId++;
+                break;
+            }
+        }
+    }
+}
+
+void tarjan(core::GlobalState &gs) {
+    Timer timeit(gs.tracer(), "tarjan");
+    SCCMetadata metadata;
+    auto allPackages = gs.packageDB().packages();
+    for (auto package : allPackages) {
+        if (metadata.index[package] == 0) {
+            strongConnect(gs, metadata, package);
+        }
+    }
+}
+
 void validateLayering(const core::Context &ctx, const Import &i) {
     if (i.type == ImportType::Test) {
         return;
@@ -1798,6 +1860,10 @@ void Packager::run(core::GlobalState &gs, WorkerPool &workers, absl::Span<ast::P
 
         for (size_t i = 0; i < files.size(); ++i) {
             taskq->push(i, 1);
+        }
+
+        if (gs.packageDB().enforceLayering()) {
+            tarjan(gs);
         }
 
         workers.multiplexJob("rewritePackagesAndFiles", [&gs, &files, &barrier, taskq]() {
