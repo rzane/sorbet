@@ -1631,6 +1631,8 @@ void validateLayering(const core::Context &ctx, const Import &i) {
     ENFORCE(packageDB.getPackageForFile(ctx, ctx.file).exists())
     auto &thisPkg = PackageInfoImpl::from(packageDB.getPackageForFile(ctx, ctx.file));
     auto &otherPkg = PackageInfoImpl::from(packageDB.getPackageInfo(i.name.mangledName));
+    ENFORCE(thisPkg.sccID.has_value());
+    ENFORCE(otherPkg.sccID.has_value());
 
     if (!thisPkg.strictDependenciesLevel.has_value() || !otherPkg.strictDependenciesLevel.has_value() ||
         !thisPkg.layer.has_value() || !otherPkg.layer.has_value()) {
@@ -1673,6 +1675,16 @@ void validateLayering(const core::Context &ctx, const Import &i) {
                         strictDependenciesLevelToString(otherPkgExpectedLevel));
             e.addErrorLine(core::Loc(otherPkg.loc.file(), otherPkg.strictDependenciesLevel.value().second),
                            "`{}`'s `{}` level declared here", otherPkg.name.toString(ctx), "strict_dependencies");
+        }
+    }
+
+    if (thisPkg.strictDependenciesLevel.value().first >= core::packages::StrictDependenciesLevel::LayeredDag) {
+        if (thisPkg.sccID == otherPkg.sccID) {
+            if (auto e = ctx.beginError(i.name.loc, core::errors::Packager::StrictDependenciesViolation)) {
+                e.setHeader("importing `{}` will put this package into a cycle, which is not valid at `{}` level `{}`",
+                            otherPkg.name.toString(ctx), "strict_dependencies",
+                            strictDependenciesLevelToString(thisPkg.strictDependenciesLevel.value().first));
+            }
         }
     }
 }
