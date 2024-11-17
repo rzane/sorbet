@@ -59,6 +59,19 @@ string buildValidLayersStr(const core::GlobalState &gs) {
     return result;
 }
 
+string strictDependenciesLevelToString(core::packages::StrictDependenciesLevel level) {
+    switch (level) {
+        case core::packages::StrictDependenciesLevel::False:
+            return "false";
+        case core::packages::StrictDependenciesLevel::Layered:
+            return "layered";
+        case core::packages::StrictDependenciesLevel::LayeredDag:
+            return "layered_dag";
+        case core::packages::StrictDependenciesLevel::Dag:
+            return "dag";
+    }
+}
+
 struct FullyQualifiedName {
     vector<core::NameRef> parts;
     core::Loc loc;
@@ -1646,9 +1659,18 @@ void validateLayering(const core::Context &ctx, const Import &i) {
         }
     }
 
-    if (otherPkg.strictDependenciesLevel.value().first == core::packages::StrictDependenciesLevel::False) {
+    core::packages::StrictDependenciesLevel otherPkgExpectedLevel = core::packages::StrictDependenciesLevel::Layered;
+
+    if (thisPkg.strictDependenciesLevel.value().first == core::packages::StrictDependenciesLevel::Dag) {
+        otherPkgExpectedLevel = core::packages::StrictDependenciesLevel::Dag;
+    }
+
+    if (otherPkg.strictDependenciesLevel.value().first < otherPkgExpectedLevel) {
+        // TODO: if otherPkgExpectedLevel is dag, it's not really a layering violation, it's a strict deps violation
         if (auto e = ctx.beginError(i.name.loc, core::errors::Packager::LayeringViolation)) {
-            e.setHeader("All of this package's dependecies must be `{}` or higher", "layered");
+            // TODO: reword
+            e.setHeader("All of this package's dependecies must be `{}` or higher",
+                        strictDependenciesLevelToString(otherPkgExpectedLevel));
             e.addErrorLine(core::Loc(otherPkg.loc.file(), otherPkg.strictDependenciesLevel.value().second),
                            "`{}`'s `{}` level declared here", otherPkg.name.toString(ctx), "strict_dependencies");
         }
