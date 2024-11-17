@@ -1658,6 +1658,7 @@ void validateLayering(const core::Context &ctx, const Import &i) {
                            thisPkg.name.toString(ctx), "layer");
             e.addErrorLine(core::Loc(otherPkg.loc.file(), otherPkg.layer.value().second), "`{}`'s `{}` declared here",
                            otherPkg.name.toString(ctx), "layer");
+            // Autocorrect to delete this import?
         }
     }
 
@@ -1675,16 +1676,27 @@ void validateLayering(const core::Context &ctx, const Import &i) {
                         strictDependenciesLevelToString(otherPkgExpectedLevel));
             e.addErrorLine(core::Loc(otherPkg.loc.file(), otherPkg.strictDependenciesLevel.value().second),
                            "`{}`'s `{}` level declared here", otherPkg.name.toString(ctx), "strict_dependencies");
+            // Autocorrect to delete this import?
         }
     }
 
     if (thisPkg.strictDependenciesLevel.value().first >= core::packages::StrictDependenciesLevel::LayeredDag) {
+        // TODO: is it possible that there's only a cycle because thisPkg imports 2 (or more) packages that lead to the
+        // cycle and then deleting one of the imports will break the cycle?
+        // In that case, putting an error on the import might be the wrong error, because it's not one import that's the
+        // problem, it's the combination.
+        //
+        // The answer is no.
+        // Suppose A -> B and A -> C, and A, B, C are in same SCC. If we delete A -> B, the condition for A and C to
+        // remain in same SCC is that there's a path from C to A. Deleting the A -> B edge doesn't have any effect on
+        // that being true or not.
         if (thisPkg.sccID == otherPkg.sccID) {
             if (auto e = ctx.beginError(i.name.loc, core::errors::Packager::StrictDependenciesViolation)) {
                 e.setHeader("importing `{}` will put this package into a cycle, which is not valid at `{}` level `{}`",
                             otherPkg.name.toString(ctx), "strict_dependencies",
                             strictDependenciesLevelToString(thisPkg.strictDependenciesLevel.value().first));
             }
+            // Autocorrect to delete this import?
         }
     }
 }
@@ -1732,6 +1744,7 @@ void validatePackage(core::Context ctx) {
     if (ctx.file.data(ctx).originalSigil < core::StrictLevel::Strict) {
         if (auto e = ctx.beginError(core::LocOffsets{0, 0}, core::errors::Packager::PackageFileMustBeStrict)) {
             e.setHeader("Package files must be at least `{}`", "# typed: strict");
+            // TODO(neil): Autocorrect to update the sigil?
         }
     }
 
