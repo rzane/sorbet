@@ -298,6 +298,10 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
     auto resultq = make_shared<BlockingBoundedQueue<JobOutput>>(numWorkers);
     atomic<size_t> pendingJobs{0};
 
+    // Track the directories we've already seen to protect against infinite symlink loops.
+    std::unordered_set<ino_t> visited;
+    absl::Mutex visitedMutex;
+
     // The invariant that the code below must maintain is pendingJobs must be
     // at least as large as the number of items in jobq.  Therefore, once
     // pendingJobs is 0, whatever thread observes that can be assured that there
@@ -309,13 +313,10 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
     jobq->push(path, 1);
 
     workers.multiplexJob("options.findFiles", [numWorkers, jobq, resultq, &pendingJobs, &basePath, &extensions,
-                                               &recursive, &absoluteIgnorePatterns, &relativeIgnorePatterns]() {
+                                               &recursive, &absoluteIgnorePatterns, &relativeIgnorePatterns,
+                                               &visited, &visitedMutex]() {
         Job job;
         vector<string> output;
-
-        // We need to track the directories we've already seen to protect against
-        // infinite loops in the case of symlink cycles.
-        std::unordered_set<ino_t> visited;
 
         try {
             while (true) {
@@ -359,7 +360,6 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
                         if (stat(fullPath.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode)) {
                             isDir = true;
                             inode = buffer.st_ino;
-                            cout << fmt::format("symlink detected: {}\n", fullPath);
                         }
                     }
 
@@ -370,9 +370,11 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
                         if (nameview == "."sv || nameview == ".."sv) {
                             continue;
                         }
-                        if (!visited.insert(inode).second) {
-                            cout << fmt::format("cycle detected: {}\n", fullPath);
-                            continue;
+                        {
+                            absl::MutexLock lck(&visitedMutex);
+                            if (!visited.insert(inode).second) {
+                                continue;
+                            }
                         }
                     } else {
                         auto dotLocation = nameview.rfind('.');
