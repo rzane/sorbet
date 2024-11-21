@@ -276,7 +276,11 @@ bool sorbet::FileOps::isFileIgnored(string_view basePath, string_view filePath,
 }
 
 struct QuitToken {};
-using Job = variant<QuitToken, string>;
+struct JobParams {
+    string path;
+    int symlinkDepth;
+};
+using Job = variant<QuitToken, JobParams>;
 // We record all classes of exceptions we can throw separately, rather than one single `SorbetException`.
 //
 // We do this for two reasons: one is that when looking for a `catch` handler, C++ will only look for
@@ -288,6 +292,8 @@ using Job = variant<QuitToken, string>;
 // exception would get copied into a `JobOutput` object as a `SorbetException`, and therefore the
 // dynamic type of the original exception would be lost.
 using JobOutput = variant<std::monostate, sorbet::FileNotFoundException, sorbet::FileNotDirException, vector<string>>;
+
+const int MAX_SYMLINK_DEPTH = 40;
 
 void appendFilesInDir(string_view basePath, const string &path, const sorbet::UnorderedSet<string> &extensions,
                       sorbet::WorkerPool &workers, bool recursive, vector<string> &allPaths,
@@ -306,7 +312,7 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
     // In practice, all it takes to maintain this invariant is that pendingJobs
     // must be incremented prior to pushing work onto jobq.
     ++pendingJobs;
-    jobq->push(path, 1);
+    jobq->push(JobParams{path, 0}, 1);
 
     workers.multiplexJob("options.findFiles", [numWorkers, jobq, resultq, &pendingJobs, &basePath, &extensions,
                                                &recursive, &absoluteIgnorePatterns, &relativeIgnorePatterns]() {
@@ -323,9 +329,10 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
                     break;
                 }
 
-                auto *strvariant = std::get_if<string>(&job);
-                ENFORCE(strvariant != nullptr);
-                auto &path = *strvariant;
+                auto *jobParams = std::get_if<JobParams>(&job);
+                ENFORCE(jobParams != nullptr);
+                auto &path = jobParams->path;
+                int symlinkDepth = jobParams->symlinkDepth;
 
                 DIR *dir;
                 struct dirent *entry;
@@ -347,8 +354,16 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
                     string_view nameview{entry->d_name, namelen};
 
                     auto fullPath = fmt::format("{}/{}", path, nameview);
-                    bool isDir =
-                        (entry->d_type == DT_DIR) || (entry->d_type == DT_LNK && sorbet::FileOps::dirExists(fullPath));
+                    bool isDir = entry->d_type == DT_DIR;
+                    int nextSymlinkDepth = symlinkDepth;
+
+                    if (entry->d_type == DT_LNK && sorbet::FileOps::dirExists(fullPath)) {
+                        isDir = true;
+                        ++nextSymlinkDepth;
+                        if (nextSymlinkDepth > MAX_SYMLINK_DEPTH) {
+                            continue;
+                        }
+                    }
 
                     if (isDir) {
                         if (!recursive) {
@@ -376,7 +391,7 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
 
                     if (isDir) {
                         ++pendingJobs;
-                        jobq->push(move(fullPath), 1);
+                        jobq->push(JobParams{move(fullPath), nextSymlinkDepth}, 1);
                     } else {
                         output.push_back(move(fullPath));
                     }
