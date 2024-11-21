@@ -313,6 +313,10 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
         Job job;
         vector<string> output;
 
+        // We need to track the directories we've already seen to protect against
+        // infinite loops in the case of symlink cycles.
+        std::unordered_set<ino_t> visited;
+
         try {
             while (true) {
                 auto result = jobq->try_pop(job);
@@ -345,11 +349,29 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
                 while ((entry = readdir(dir)) != nullptr) {
                     const auto namelen = strlen(entry->d_name);
                     string_view nameview{entry->d_name, namelen};
-                    if (entry->d_type == DT_DIR) {
+
+                    auto fullPath = fmt::format("{}/{}", path, nameview);
+                    bool isDir = (entry->d_type == DT_DIR);
+                    ino_t inode = entry->d_ino;
+
+                    if (entry->d_type == DT_LNK) {
+                        struct stat buffer;
+                        if (stat(fullPath.c_str(), &buffer) == 0 && S_ISDIR(buffer.st_mode)) {
+                            isDir = true;
+                            inode = buffer.st_ino;
+                            cout << fmt::format("symlink detected: {}\n", fullPath);
+                        }
+                    }
+
+                    if (isDir) {
                         if (!recursive) {
                             continue;
                         }
                         if (nameview == "."sv || nameview == ".."sv) {
+                            continue;
+                        }
+                        if (!visited.insert(inode).second) {
+                            cout << fmt::format("cycle detected: {}\n", fullPath);
                             continue;
                         }
                     } else {
@@ -364,13 +386,12 @@ void appendFilesInDir(string_view basePath, const string &path, const sorbet::Un
                         }
                     }
 
-                    auto fullPath = fmt::format("{}/{}", path, nameview);
                     if (sorbet::FileOps::isFileIgnored(basePath, fullPath, absoluteIgnorePatterns,
                                                        relativeIgnorePatterns)) {
                         continue;
                     }
 
-                    if (entry->d_type == DT_DIR) {
+                    if (isDir) {
                         ++pendingJobs;
                         jobq->push(move(fullPath), 1);
                     } else {
